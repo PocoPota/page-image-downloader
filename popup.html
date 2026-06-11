@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>画像をダウンロード</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>画像をZIP保存</h1>
+        <p id="pageTitle">現在のページから画像を収集します。</p>
+      </header>
+
+      <section class="controls">
+        <label>
+          <input id="includeCssImages" type="checkbox" checked>
+          CSS背景画像も含める
+        </label>
+        <label>
+          <input id="minSize" type="number" min="0" step="1" value="0">
+          最小サイズ(px)
+        </label>
+      </section>
+
+      <button id="downloadButton" type="button">画像を検索してZIPを作成</button>
+      <progress id="progress" max="100" value="0" hidden></progress>
+      <p id="status" role="status"></p>
+    </main>
+
+    <script src="zip.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>
