@@ -165,16 +165,43 @@ async function getActiveTab() {
   return tab;
 }
 
-async function collectImages(tab) {
-  const response = await chrome.tabs.sendMessage(tab.id, {
+function canAccessTab(tab) {
+  return /^https?:|^file:/i.test(tab?.url || "");
+}
+
+function isMissingReceiverError(error) {
+  return /Could not establish connection|Receiving end does not exist/i.test(error?.message || "");
+}
+
+async function sendCollectMessage(tab) {
+  return chrome.tabs.sendMessage(tab.id, {
     type: "COLLECT_PAGE_IMAGES",
     options: {
       includeCssImages: includeCssImages.checked,
       minSize: Number(minSize.value || 0)
     }
   });
+}
 
-  return response;
+async function collectImages(tab) {
+  if (!canAccessTab(tab)) {
+    throw new Error("このページでは画像を収集できません。通常のWebページで実行してください。");
+  }
+
+  try {
+    return await sendCollectMessage(tab);
+  } catch (error) {
+    if (!isMissingReceiverError(error)) {
+      throw error;
+    }
+  }
+
+  await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    files: ["content.js"]
+  });
+
+  return sendCollectMessage(tab);
 }
 
 async function fetchImage(image, index, options = {}) {
