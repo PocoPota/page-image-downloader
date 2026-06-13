@@ -1,6 +1,7 @@
 const downloadButton = document.getElementById("downloadButton");
 const includeCssImages = document.getElementById("includeCssImages");
 const minSize = document.getElementById("minSize");
+const convertToPng = document.getElementById("convertToPng");
 const progress = document.getElementById("progress");
 const statusText = document.getElementById("status");
 const pageTitle = document.getElementById("pageTitle");
@@ -13,6 +14,7 @@ function setBusy(isBusy) {
   downloadButton.disabled = isBusy;
   includeCssImages.disabled = isBusy;
   minSize.disabled = isBusy;
+  convertToPng.disabled = isBusy;
   progress.hidden = !isBusy;
   if (!isBusy) progress.value = 0;
 }
@@ -74,6 +76,12 @@ function filenameFromUrl(url, index, contentType) {
   return basename;
 }
 
+function filenameAsPng(filename) {
+  const dot = filename.lastIndexOf(".");
+  const basename = dot > 0 ? filename.slice(0, dot) : filename;
+  return `${basename}.png`;
+}
+
 function uniqueFilename(name, usedNames) {
   const normalized = name || "image.bin";
   if (!usedNames.has(normalized)) {
@@ -95,6 +103,63 @@ function uniqueFilename(name, usedNames) {
   return unique;
 }
 
+function loadImageFromBlob(blob) {
+  return new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(blob);
+    const image = new Image();
+
+    image.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("PNG変換用の画像読み込みに失敗しました。"));
+    };
+
+    image.src = objectUrl;
+  });
+}
+
+function canvasToPngBlob(canvas) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) {
+        resolve(blob);
+      } else {
+        reject(new Error("PNG変換に失敗しました。"));
+      }
+    }, "image/png");
+  });
+}
+
+async function convertBlobToPng(blob) {
+  if (blob.type.split(";")[0].trim().toLowerCase() === "image/png") {
+    return blob;
+  }
+
+  const image = await loadImageFromBlob(blob);
+  const width = image.naturalWidth || image.width;
+  const height = image.naturalHeight || image.height;
+
+  if (!width || !height) {
+    throw new Error("PNG変換できない画像サイズです。");
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("PNG変換用のCanvasを作成できませんでした。");
+  }
+
+  context.drawImage(image, 0, 0, width, height);
+
+  return canvasToPngBlob(canvas);
+}
+
 async function getActiveTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   return tab;
@@ -112,7 +177,7 @@ async function collectImages(tab) {
   return response;
 }
 
-async function fetchImage(image, index) {
+async function fetchImage(image, index, options = {}) {
   const response = await fetch(image.url, {
     credentials: "include",
     cache: "force-cache"
@@ -124,11 +189,20 @@ async function fetchImage(image, index) {
 
   const blob = await response.blob();
   const contentType = response.headers.get("content-type") || blob.type || "";
+  const filename = filenameFromUrl(image.url, index, contentType);
+
+  if (options.convertToPng) {
+    return {
+      blob: await convertBlobToPng(blob),
+      contentType: "image/png",
+      filename: filenameAsPng(filename)
+    };
+  }
 
   return {
     blob,
     contentType,
-    filename: filenameFromUrl(image.url, index, contentType)
+    filename
   };
 }
 
@@ -155,14 +229,15 @@ async function downloadZip() {
     const entries = [];
     const usedNames = new Set();
     const failures = [];
+    const shouldConvertToPng = convertToPng.checked;
 
     progress.max = images.length;
     progress.value = 0;
-    setStatus(`${images.length}件の画像を取得しています...`);
+    setStatus(`${images.length}件の画像を${shouldConvertToPng ? "PNG形式で" : ""}取得しています...`);
 
     for (const [index, image] of images.entries()) {
       try {
-        const downloaded = await fetchImage(image, index + 1);
+        const downloaded = await fetchImage(image, index + 1, { convertToPng: shouldConvertToPng });
         entries.push({
           name: uniqueFilename(`images/${downloaded.filename}`, usedNames),
           data: downloaded.blob
@@ -184,6 +259,7 @@ async function downloadZip() {
       pageUrl: page.url || tab.url || "",
       downloadedAt: new Date().toISOString(),
       imageCount: entries.length,
+      convertedToPng: shouldConvertToPng,
       failedCount: failures.length,
       failures
     };
